@@ -22,7 +22,7 @@ class Application:
         "endoscope_type": ["change", "random", "none", "0 endoscope", "30 endoscope"],
         "homing_type": ["change", "random", "unknown", "done", "drape", "end effector", "slide"],
         "is_clutched": ["change", "random", "false", "true"],
-        "esu_type": ["change", "random", "disable", "enable", "activate"],
+        "esu_state": ["change", "random", "none", "coag", "cut"],
         "manual_type": ["change", "random", "none", "op", "su", "slide"],
         "is_drape": ["change", "random", "false", "true"],
         "is_trocar": ["change", "random", "false", "true"]
@@ -38,6 +38,8 @@ class Application:
         self.server_socket = None
         self.is_auto_sending = False  # 자동 전송 상태
         self.auto_send_thread = None  # 자동 전송 스레드
+        self.is_swap_pedal_auto = False  # 스왑페달 자동 시작 상태
+        self.swap_pedal_auto_thread = None  # 스왑페달 자동 시작 스레드
         
         # 메시지 큐 생성
         self.message_queue = queue.Queue()
@@ -50,9 +52,27 @@ class Application:
         control_frame = ttk.Frame(self.root)
         control_frame.pack(pady=(10,0))  # 위쪽만 패딩 적용
         
+        # 서버 설정 프레임
+        server_config_frame = ttk.Frame(control_frame)
+        server_config_frame.pack(side=tk.LEFT, padx=5)
+        
+        # IP 주소 입력
+        ip_label = ttk.Label(server_config_frame, text="IP:")
+        ip_label.pack(side=tk.LEFT, padx=(0,2))
+        self.ip_var = tk.StringVar(value="127.0.0.1")
+        self.ip_entry = ttk.Entry(server_config_frame, textvariable=self.ip_var, width=15)
+        self.ip_entry.pack(side=tk.LEFT, padx=(0,5))
+        
+        # 포트 번호 입력
+        port_label = ttk.Label(server_config_frame, text="Port:")
+        port_label.pack(side=tk.LEFT, padx=(0,2))
+        self.port_var = tk.StringVar(value="19738")
+        self.port_entry = ttk.Entry(server_config_frame, textvariable=self.port_var, width=6)
+        self.port_entry.pack(side=tk.LEFT, padx=(0,5))
+        
         # 버튼을 담을 프레임
         button_frame = ttk.Frame(control_frame)
-        button_frame.pack()
+        button_frame.pack(side=tk.LEFT)
         
         # 레이블 생성
         self.label = ttk.Label(button_frame, text="서버 대기중...")
@@ -65,6 +85,14 @@ class Application:
         # 자동 전송 버튼 생성
         self.auto_send_button = ttk.Button(button_frame, text="메시지 자동전송", command=self.toggle_auto_send)
         self.auto_send_button.pack(side=tk.LEFT, padx=5)
+        
+        # 스왑페달 버튼 생성
+        self.swap_pedal_button = ttk.Button(button_frame, text="스왑페달", command=self.swap_pedal)
+        self.swap_pedal_button.pack(side=tk.LEFT, padx=5)
+        
+        # 스왑페달 자동 시작 버튼 생성
+        self.swap_pedal_auto_button = ttk.Button(button_frame, text="스왑페달자동시작", command=self.toggle_swap_pedal_auto)
+        self.swap_pedal_auto_button.pack(side=tk.LEFT, padx=5)
         
         # Interval 입력 프레임
         interval_frame = ttk.Frame(button_frame)
@@ -352,21 +380,29 @@ class Application:
     
     def start_server(self):
         try:
+            # IP와 포트 번호 가져오기
+            ip = self.ip_var.get()
+            try:
+                port = int(self.port_var.get())
+            except ValueError:
+                self.update_label("잘못된 포트 번호입니다.")
+                return
+
             # 이전 연결 정리
             try:
                 temp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 temp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                temp_socket.bind(('127.0.0.1', 20798))
+                temp_socket.bind((ip, port))
                 temp_socket.close()
             except Exception as e:
                 self.update_label(f"이전 연결 정리 중 오류: {str(e)}")
 
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # 소켓 재사용 옵션 추가
-            self.server_socket.bind(('127.0.0.1', 20798))
+            self.server_socket.bind((ip, port))
             self.server_socket.listen(1)
             self.is_server_running = True
-            self.update_label("서버가 시작되었습니다. 연결 대기중...")
+            self.update_label(f"서버가 시작되었습니다. ({ip}:{port}) 연결 대기중...")
             
             # 메시지 송수신 스레드 시작
             sender_thread = threading.Thread(target=self.message_sender_thread)
@@ -418,6 +454,10 @@ class Application:
         self.is_auto_sending = False  # 자동 전송 중지
         if self.auto_send_thread:
             self.auto_send_thread.join(timeout=1.1)
+        
+        self.is_swap_pedal_auto = False  # 스왑페달 자동 시작 중지
+        if self.swap_pedal_auto_thread:
+            self.swap_pedal_auto_thread.join(timeout=1.1)
         
         self.is_server_running = False
         if self.server_socket:
@@ -569,6 +609,56 @@ class Application:
             
             # 선택된 Arm의 상태 전송
             self.send_arm_state(arm)
+            
+            # interval 시간만큼 대기
+            time.sleep(interval)
+
+    def swap_pedal(self):
+        """Arm1과 Arm2의 is_selected 상태를 서로 교환하고 메시지 전송"""
+        # Arm1과 Arm2의 is_selected 상태 가져오기
+        arm1_selected = self.state_vars["Arm 1"]["is_selected"].get()
+        arm2_selected = self.state_vars["Arm 2"]["is_selected"].get()
+        
+        # 상태 교환
+        self.state_vars["Arm 1"]["is_selected"].set(arm2_selected)
+        self.state_vars["Arm 2"]["is_selected"].set(arm1_selected)
+        
+        # Arm1 메시지 전송
+        self.send_arm_state("Arm 1")
+        
+        # Arm3 메시지 전송
+        self.send_arm_state("Arm 2")
+
+    def toggle_swap_pedal_auto(self):
+        """스왑페달 자동 시작/중지 토글"""
+        if not self.is_swap_pedal_auto:
+            self.is_swap_pedal_auto = True
+            self.swap_pedal_auto_button.config(text="스왑페달자동중지")
+            
+            # 스왑페달 자동 시작 스레드 시작
+            self.swap_pedal_auto_thread = threading.Thread(target=self.auto_swap_pedal)
+            self.swap_pedal_auto_thread.daemon = True
+            self.swap_pedal_auto_thread.start()
+        else:
+            self.is_swap_pedal_auto = False
+            self.swap_pedal_auto_button.config(text="스왑페달자동시작")
+            if self.swap_pedal_auto_thread:
+                self.swap_pedal_auto_thread.join(timeout=1.1)
+                self.swap_pedal_auto_thread = None
+
+    def auto_swap_pedal(self):
+        """자동으로 스왑페달 동작을 반복"""
+        try:
+            # interval 값 가져오기 (ms 단위를 초 단위로 변환)
+            interval = float(self.interval_var.get()) / 1000.0
+        except ValueError:
+            # interval 값이 잘못된 경우 기본값(1초) 사용
+            self.interval_var.set("1000")
+            interval = 1.0
+
+        while self.is_swap_pedal_auto:
+            # 스왑페달 동작 실행
+            self.swap_pedal()
             
             # interval 시간만큼 대기
             time.sleep(interval)
