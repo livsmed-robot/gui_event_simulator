@@ -82,6 +82,14 @@ class Application:
         self.button = ttk.Button(button_frame, text="서버 시작", command=self.toggle_server)
         self.button.pack(side=tk.LEFT, padx=5)
         
+        # SR-A호기 설정 버튼 생성
+        self.sr_a_button = ttk.Button(button_frame, text="SR-A호기 설정", command=self.send_sr_a_config)
+        self.sr_a_button.pack(side=tk.LEFT, padx=5)
+        
+        # SR-B호기 설정 버튼 생성
+        self.sr_b_button = ttk.Button(button_frame, text="SR-B호기 설정", command=self.send_sr_b_config)
+        self.sr_b_button.pack(side=tk.LEFT, padx=5)
+        
         # 자동 전송 버튼 생성
         self.auto_send_button = ttk.Button(button_frame, text="메시지 자동전송", command=self.toggle_auto_send)
         self.auto_send_button.pack(side=tk.LEFT, padx=5)
@@ -662,6 +670,42 @@ class Application:
             
             # interval 시간만큼 대기
             time.sleep(interval)
+
+    def send_sr_a_config(self):
+        """SR-A호기 설정 메시지 전송"""
+        message1 = {
+            "REPORT_TO_GUI": 0,
+            "robot_number": 1,
+            "arm_index": 0
+        }
+        json_message1 = json.dumps(message1)
+        self.message_queue.put(json_message1)
+        
+        message2 = {
+            "REPORT_TO_GUI": 0,
+            "robot_number": 1,
+            "arm_index": 1
+        }
+        json_message2 = json.dumps(message2)
+        self.message_queue.put(json_message2)
+
+    def send_sr_b_config(self):
+        """SR-B호기 설정 메시지 전송"""
+        message1 = {
+            "REPORT_TO_GUI": 0,
+            "robot_number": 2,
+            "arm_index": 2
+        }
+        json_message1 = json.dumps(message1)
+        self.message_queue.put(json_message1)
+        
+        message2 = {
+            "REPORT_TO_GUI": 0,
+            "robot_number": 2,
+            "arm_index": 3
+        }
+        json_message2 = json.dumps(message2)
+        self.message_queue.put(json_message2)
 
 if __name__ == "__main__":
     app = Application()
