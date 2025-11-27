@@ -40,6 +40,7 @@ class Application:
         self.auto_send_thread = None  # 자동 전송 스레드
         self.is_swap_pedal_auto = False  # 스왑페달 자동 시작 상태
         self.swap_pedal_auto_thread = None  # 스왑페달 자동 시작 스레드
+        self.headin = 0  # headin 초기값
         
         # 메시지 큐 생성
         self.message_queue = queue.Queue()
@@ -101,6 +102,10 @@ class Application:
         # 스왑페달 자동 시작 버튼 생성
         self.swap_pedal_auto_button = ttk.Button(button_frame, text="스왑페달자동시작", command=self.toggle_swap_pedal_auto)
         self.swap_pedal_auto_button.pack(side=tk.LEFT, padx=5)
+        
+        # headin 버튼 생성
+        self.headin_button = ttk.Button(button_frame, text="headin: 0", command=self.toggle_headin)
+        self.headin_button.pack(side=tk.LEFT, padx=5)
         
         # Interval 입력 프레임
         interval_frame = ttk.Frame(button_frame)
@@ -670,6 +675,20 @@ class Application:
             
             # interval 시간만큼 대기
             time.sleep(interval)
+
+    def toggle_headin(self):
+        """headin 값을 0, 1, 2, 3 사이에서 순환하고 메시지 전송"""
+        self.headin = (self.headin + 1) % 4
+        self.headin_button.config(text=f"headin: {self.headin}")
+        
+        # headin 메시지 전송
+        message = {
+            "REPORT_TO_GUI": 1,
+            "arm_index": -1,
+            "head_in": self.headin
+        }
+        json_message = json.dumps(message)
+        self.message_queue.put(json_message)
 
     def send_sr_a_config(self):
         """SR-A호기 설정 메시지 전송"""
